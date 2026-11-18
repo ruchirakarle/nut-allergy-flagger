@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nut Flagger</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🥜</text></svg>">
+<style>
+  * { box-sizing: border-box; }
+  body { margin:0; min-height:100vh; padding:2rem 1rem;
+         background: linear-gradient(160deg, #fff6e5 0%, #ffe3ec 100%);
+         font-family: "Trebuchet MS", "Comic Sans MS", sans-serif; color:#5a3418; }
+  main { max-width: 680px; margin: 0 auto; }
+  h1 { text-align:center; font-size:2.6rem; color:#8a4b1f; margin:0; }
+  .sub { text-align:center; color:#a0643a; margin:.3rem 0 1.5rem; }
+  .examples { display:grid; grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); gap:.5rem; margin:.5rem 0 1rem; }
+  button { font:inherit; cursor:pointer; border:2px solid #e8c9a8; background:#fff; color:#8a4b1f;
+           border-radius:14px; padding:.6rem; transition:transform .1s; }
+  button:hover { transform:translateY(-2px); background:#fff8ee; }
+  textarea { width:100%; height:140px; padding:.8rem; font:inherit; border-radius:16px;
+             border:2px solid #e8c9a8; resize:vertical; }
+  #go { width:100%; margin-top:.8rem; background:#ff7a59; border-color:#ff7a59; color:#fff;
+        font-weight:700; font-size:1.1rem; padding:.8rem; }
+  #go:hover { background:#f2653f; }
+  .card { border-radius:24px; padding:1.4rem 1.6rem; margin-top:1.2rem; text-align:center;
+          box-shadow:0 6px 18px rgba(138,75,31,.15); }
+  .card .big { font-size:3.2rem; line-height:1; }
+  .card h2 { margin:.4rem 0 .2rem; }
+  .bad { background:#ffd9d4; color:#8c1d12; } .warn { background:#fff0b8; color:#7a5a00; } .good { background:#d6f5d6; color:#1d6a2a; }
+  .chip { display:inline-block; margin:.2rem; padding:.25rem .8rem; border-radius:999px; background:rgba(255,255,255,.75); font-weight:700; }
+  .hint { text-align:center; color:#a0643a; margin-top:1rem; }
+  .fine { text-align:center; color:#a0643a; font-size:.8rem; margin-top:2rem; }
+</style>
+</head>
+<body>
+<main>
+  <h1>🥜 Nut Flagger 🌰</h1>
+  <div class="sub">Paste an ingredient list and I'll sniff out nuts for you!</div>
+
+  <strong>Try an example:</strong>
+  <div class="examples" id="examples"></div>
+
+  <textarea id="text" placeholder="e.g. Sugar, almonds, cocoa butter, milk powder..." aria-label="Ingredients"></textarea>
+  <button id="go">🔍 Check for nuts</button>
+  <div id="result" aria-live="polite"></div>
+
+  <div class="fine">Demo only, based on simple keyword matching. It can miss things.
+    Always read the real label and ask a doctor if you have a serious allergy. 💛</div>
+</main>
+
+<script>
+// Keep in sync with nutlogic.py
+const TREE_NUTS = ["almond","hazelnut","cashew","walnut","pecan","pistachio","macadamia","brazil nut",
+  "pine nut","pine kernel","chestnut","filbert","praline","marzipan","gianduja","tree nut","nut"];
+const PEANUTS = ["peanut","groundnut","arachis oil"];
+const NEGATIONS = /\b(nut|peanut|tree nut)[- ]free\b|\b(no|without|free from) (tree )?(nuts?|peanuts?)\b/g;
+const MAY_CONTAIN = /may contain|might contain|traces? of|processed in|made in a (facility|factory)|manufactured (in|on)|shared (facility|equipment)|produced in a/;
+
+const compile = words => new RegExp("\\b(" +
+  [...words].sort((a, b) => b.length - a.length).map(w => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|") +
+  ")(?:s|es)?\\b", "g");
+const TREE_RE = compile(TREE_NUTS), PEANUT_RE = compile(PEANUTS);
+const uniq = xs => [...new Set(xs)];
+
+function check(raw) {
+  const text = (raw || "").toLowerCase().replace(NEGATIONS, " ");
+  let direct = [], traces = [];
+  for (const sentence of text.split(/[.;\n]+/)) {
+    const bucket = MAY_CONTAIN.test(sentence) ? traces : direct;
+    for (const rx of [TREE_RE, PEANUT_RE])
+      for (const m of sentence.matchAll(rx)) bucket.push(m[1]);
+  }
+  direct = uniq(direct); traces = uniq(traces);
+  const tree = direct.filter(w => TREE_NUTS.includes(w));
+  const peanuts = direct.filter(w => PEANUTS.includes(w));
+  return {
+    status: direct.length ? "contains" : traces.length ? "may_contain" : "clear",
+    tree, peanuts, traces,
+    pineOnly: tree.length > 0 && tree.every(w => w === "pine nut" || w === "pine kernel"),
+  };
+}
+
+const EXAMPLES = {
+  "🍫 Choco spread": "Sugar, palm oil, hazelnuts (13%), skimmed milk powder, cocoa, soy lecithin, vanillin.",
+  "🥣 Oat cereal": "Whole grain oats, sugar, honey, salt. May contain traces of tree nuts.",
+  "🍞 Plain bread": "Wheat flour, water, yeast, salt, sugar, sunflower oil.",
+  "🥥 Tricky one": "Coconut milk, nutmeg, butternut squash, sea salt.",
+};
+const $ = id => document.getElementById(id);
+const chips = ws => ws.map(w => `<span class="chip">${w}</span>`).join("");
+
+for (const [label, txt] of Object.entries(EXAMPLES)) {
+  const b = document.createElement("button");
+  b.textContent = label;
+  b.onclick = () => { $("text").value = txt; render(); };
+  $("examples").appendChild(b);
+}
+
+function render() {
+  const text = $("text").value, out = $("result");
+  if (!text.trim()) { out.innerHTML = '<div class="hint">Type or paste some ingredients first! 🐿️</div>'; return; }
+  const r = check(text);
+  if (r.status === "contains") {
+    out.innerHTML = `<div class="card bad"><div class="big">🚫</div><h2>Contains nuts!</h2>` +
+      (r.tree.length ? `<div>🌰 Tree nuts: ${chips(r.tree)}</div>` : "") +
+      (r.peanuts.length ? `<div>🥜 Peanuts: ${chips(r.peanuts)}</div>` : "") +
+      (r.pineOnly ? "<p>Pine nuts are technically seeds, but they trigger some nut allergies.</p>" : "") + `</div>`;
+  } else if (r.status === "may_contain") {
+    out.innerHTML = `<div class="card warn"><div class="big">⚠️</div><h2>May contain traces</h2>
+      <div>Warning mentions: ${chips(r.traces)}</div><p>Made in a shared facility. Risky if your allergy is severe.</p></div>`;
+  } else {
+    out.innerHTML = `<div class="card good"><div class="big">✅</div><h2>No nuts spotted</h2>
+      <p>I didn't find any nut words in this list.</p></div>`;
+  }
+}
+$("go").onclick = render;
+</script>
+</body>
+</html>
